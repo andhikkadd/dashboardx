@@ -1,0 +1,131 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String    @map("password_hash")
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts      Account[]
+  sessions      Session[]
+
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Account {
+  id                String          @id @default(cuid())
+  userId            String          @map("user_id")
+  username          String
+  displayName       String?         @map("display_name")
+  label             String?
+  profileImage      String?         @map("profile_image")
+  bio               String?
+  verified          Boolean         @default(false)
+  joinDate          DateTime?       @map("join_date")
+  profileUrl        String?         @map("profile_url")
+  storageStatePath  String          @map("storage_state_path")
+  status            AccountStatus   @default(ACTIVE)
+  lastSyncAt        DateTime?       @map("last_sync_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  snapshots         AccountSnapshot[]
+  monitorLogs       MonitorLog[]
+  syncJobs          SyncJob[]
+
+  @@unique([userId, username])
+  @@map("accounts")
+}
+
+model AccountSnapshot {
+  id          String   @id @default(cuid())
+  accountId   String   @map("account_id")
+  followers   Int      @default(0)
+  following   Int      @default(0)
+  posts       Int      @default(0)
+  likes       Int      @default(0)
+  capturedAt  DateTime @default(now()) @map("captured_at")
+
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, capturedAt])
+  @@map("account_snapshots")
+}
+
+model MonitorLog {
+  id          String       @id @default(cuid())
+  accountId   String       @map("account_id")
+  type        LogType
+  message     String
+  details     Json?
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
+  @@map("monitor_logs")
+}
+
+model SyncJob {
+  id          String      @id @default(cuid())
+  accountId   String      @map("account_id")
+  status      SyncStatus  @default(PENDING)
+  startedAt   DateTime?   @map("started_at")
+  finishedAt  DateTime?   @map("finished_at")
+  error       String?
+
+  account     Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, status])
+  @@map("sync_jobs")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  INACTIVE
+  SESSION_EXPIRED
+  ERROR
+}
+
+enum LogType {
+  INFO
+  WARNING
+  ERROR
+  SYNC_START
+  SYNC_COMPLETE
+  SYNC_FAILED
+  SESSION_EXPIRED
+}
+
+enum SyncStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
