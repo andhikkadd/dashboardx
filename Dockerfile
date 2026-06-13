@@ -44,5 +44,5 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 EXPOSE 3000
 
-# Run migrations and start the server using the compiled node server.js
-CMD npx prisma migrate deploy && node server.js
+# Start the Next.js standalone server
+CMD ["node", "server.js"]
