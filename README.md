@@ -33,30 +33,6 @@ Focuses purely on **monitoring, audit analytics, and performance intelligence** 
 
 ---
 
-## 📂 Project Structure
-```text
-Dashboard-X/
-├── docker-compose.yml       # Local PostgreSQL database container configuration
-├── Dockerfile               # Production multi-stage standalone Dockerfile
-├── cloudbuild.yaml          # Google Cloud Build automation config
-├── README.md                # Project installation & documentation guide
-├── prisma/
-│   └── schema.prisma        # Database schema models
-├── scripts/
-│   ├── seed-db.ts           # DB seeder generating dummy accounts and 30-day history
-│   └── monitor-worker.ts    # Background daemon worker for periodic scraping
-├── storage-states/          # Directory storing encrypted X session cookies
-└── src/
-    ├── app/                 # Next.js App Router (pages & API routes)
-    ├── components/          # UI components (Layouts, Tables, Charts)
-    ├── hooks/               # React Query custom hooks
-    ├── lib/                 # Shared utilities (Prisma client, Auth, Encryption)
-    ├── services/            # Core business logic (Scraper & Sync Worker)
-    └── stores/              # Zustand client-side stores
-```
-
----
-
 ## ⚡ Quick Start & Installation
 
 Follow these steps to run Dashboard-X on your local machine:
@@ -126,42 +102,3 @@ npm run worker
 3. **Session Capture**: Once a successful login redirect is detected, the server extracts the `storageState` (session cookies and local storage tokens).
 4. **AES-256 Encryption**: The session state is encrypted with a highly secure **AES-256-CBC** cipher using your private `ENCRYPTION_KEY` and saved as an encrypted file.
 5. **Headless Scraper**: The background worker decrypts these files in memory to instantiate silent headless Playwright agents, safely querying metrics without triggering account locks.
-
----
-
-## ☁️ Google Cloud Platform (GCP) Deployment
-
-Dashboard-X is fully configured for deployment on GCP. You can choose between serverless hosting or a traditional virtual server:
-
-### Option A: Serverless with Google Cloud Run (Recommended & Cost-Efficient)
-Cloud Run runs Next.js serverlessly, spinning up containers on demand. You only pay for active traffic.
-
-1. **Deploy via Google Cloud Build**:
-   Use the preconfigured `cloudbuild.yaml` to build and upload your container image:
-   ```bash
-   gcloud builds submit --config cloudbuild.yaml
-   ```
-2. **Environment Variables**:
-   In your Cloud Run service configuration console, set the environment variables under **Variables & Secrets**. Use `/tmp/storage-states` for `STORAGE_STATES_DIR` since Cloud Run features a read-only filesystem except for the `/tmp` folder.
-3. **Automated Scraping via Cloud Scheduler**:
-   Since serverless instances sleep when inactive, running the continuous worker daemon won't work. Instead:
-   - Create a job in **Google Cloud Scheduler**.
-   - Set the frequency to `0 * * * *` (hourly trigger).
-   - Set target to **HTTP**, method to **POST**, and input your endpoint: `https://YOUR-CLOUD-RUN-URL.run.app/api/sync`.
-   - Select **OIDC Token** for secure authentication to prevent unauthorized sync triggers.
-
-### Option B: Traditional VM with Google Compute Engine
-1. Deploy an instance (e.g. `e2-medium` to handle Chromium memory demands).
-2. Install Node.js, Git, and Docker. Clone this repository from GitHub.
-3. Configure your production `.env` file.
-4. Run the web application using PM2 to keep it alive:
-   ```bash
-   npm run prisma:generate
-   npm run build
-   npm install -g pm2
-   pm2 start "npm run start" --name "dashboard-web"
-   ```
-5. Run the background worker daemon using PM2:
-   ```bash
-   pm2 start "npx tsx scripts/monitor-worker.ts" --name "dashboard-worker"
-   ```
