@@ -146,7 +146,7 @@ export async function syncAccount(accountId: string): Promise<boolean> {
           accountId,
           type: logType,
           message: `Synchronization failed for @${account.username}: ${errorMessage}`,
-          details: { error: errorMessage },
+          details: error?.screenshot || error?.stack || String(error),
         },
       })
     })
