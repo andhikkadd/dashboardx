@@ -37,6 +37,9 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
+# Copy start.js wrapper script
+COPY start.js ./
+
 # Copy prisma schema and engines/CLI for database migrations
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
@@ -44,5 +47,5 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 EXPOSE 3000
 
-# Start the Next.js standalone server
-CMD ["node", "server.js"]
+# Start the Next.js standalone server via wrapper
+CMD ["node", "start.js"]
