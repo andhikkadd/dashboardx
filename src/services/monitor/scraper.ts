@@ -93,6 +93,19 @@ export async function scrapeXProfile(
     try {
       await page.waitForSelector('div[data-testid="UserName"]', { timeout: 15000 })
     } catch (e) {
+      // Capture debug screenshot and page content
+      try {
+        const publicDir = path.join(process.cwd(), 'public')
+        if (!fs.existsSync(publicDir)) {
+          fs.mkdirSync(publicDir, { recursive: true })
+        }
+        await page.screenshot({ path: path.join(publicDir, 'debug-screenshot.png'), fullPage: true })
+        fs.writeFileSync(path.join(publicDir, 'debug-page.html'), await page.content(), 'utf8')
+        console.log('Saved debug-screenshot.png and debug-page.html to public folder.')
+      } catch (debugErr) {
+        console.error('Failed to capture debug screenshot/HTML:', debugErr)
+      }
+
       // If UserName testid is not present, check if we're redirected to login page (auth expired)
       const currentUrl = page.url()
       if (currentUrl.includes('login') || currentUrl.includes('i/flow/login')) {
