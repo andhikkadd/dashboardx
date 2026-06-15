@@ -42,6 +42,10 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
+# Copy playwright and playwright-core from builder to ensure CLI is present
+COPY --from=builder /app/node_modules/playwright ./node_modules/playwright
+COPY --from=builder /app/node_modules/playwright-core ./node_modules/playwright-core
+
 # Install Playwright Chromium and its OS dependencies (uses the project's exact playwright version from node_modules)
 RUN node node_modules/playwright/cli.js install chromium --with-deps
 
@@ -49,5 +53,6 @@ EXPOSE 3000
 
 # Start the Next.js standalone server via wrapper
 CMD ["node", "start.js"]
+
 
 
