@@ -89,6 +89,35 @@ export async function scrapeXProfile(
       })
     }
 
+    // Add stealth scripts to bypass simple bot detection checks on X.com
+    await context.addInitScript(() => {
+      // Hide webdriver
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      })
+      // Spoof chrome object
+      // @ts-ignore
+      window.chrome = {
+        runtime: {},
+      }
+      // Spoof plugins
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+      })
+      // Spoof languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en'],
+      })
+    })
+
+    // Set extra HTTP headers to match a real browser profile
+    await context.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'sec-ch-ua': '"Chromium";v="120", "Not?A_Brand";v="8"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+    })
+
     const page = await context.newPage()
     
     // Set timeout to 30 seconds
