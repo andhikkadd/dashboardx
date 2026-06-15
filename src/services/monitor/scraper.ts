@@ -233,7 +233,7 @@ export async function scrapeXProfile(
       console.error(`Error during scraping of @${username}:`, innerErr)
       let screenshotBase64: string | undefined
       try {
-        const screenshotBuf = await page.screenshot({ type: 'png', fullPage: true })
+        const screenshotBuf = await page.screenshot({ type: 'png', timeout: 7000 })
         screenshotBase64 = `data:image/png;base64,${screenshotBuf.toString('base64')}`
         
         // Save to public dir for redundancy/direct web access
