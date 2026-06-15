@@ -136,7 +136,7 @@ export default function LogsPage() {
                     
                     {log.details && (
                       <div className="mt-2 space-y-2">
-                        {log.details.startsWith('data:image/') ? (
+                        {typeof log.details === 'string' && log.details.startsWith('data:image/') ? (
                           <div className="border border-zinc-800 rounded-lg overflow-hidden bg-zinc-950 p-2 max-w-xl">
                             <p className="text-zinc-500 text-[10px] font-semibold mb-2">Debug Screenshot:</p>
                             <img 
