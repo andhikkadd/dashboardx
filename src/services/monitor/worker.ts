@@ -37,16 +37,20 @@ export async function syncAccount(accountId: string): Promise<boolean> {
   })
 
   try {
-    // 2. Read the encrypted storage state from file
-    let encryptedStorageState: string | null = null
-    const absolutePath = path.isAbsolute(account.storageStatePath)
-      ? account.storageStatePath
-      : path.join(process.cwd(), account.storageStatePath)
+    // 2. Read the encrypted storage state (try database first, fall back to file)
+    let encryptedStorageState: string | null = account.storageStateData
 
-    if (fs.existsSync(absolutePath)) {
-      encryptedStorageState = fs.readFileSync(absolutePath, 'utf8')
-    } else {
-      throw new Error(`STORAGE_STATE_NOT_FOUND: Session file not found at ${account.storageStatePath}`)
+    if (!encryptedStorageState) {
+      console.log(`Session state not found in database for @${account.username}. Trying file fallback...`);
+      const absolutePath = path.isAbsolute(account.storageStatePath)
+        ? account.storageStatePath
+        : path.join(process.cwd(), account.storageStatePath)
+
+      if (fs.existsSync(absolutePath)) {
+        encryptedStorageState = fs.readFileSync(absolutePath, 'utf8')
+      } else {
+        throw new Error(`STORAGE_STATE_NOT_FOUND: Session state not found in database or file at ${account.storageStatePath}`)
+      }
     }
 
     // 3. Execute Scraper
