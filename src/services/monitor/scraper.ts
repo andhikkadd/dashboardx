@@ -73,7 +73,8 @@ export async function scrapeXProfile(
     ],
   })
 
-  let context: BrowserContext
+  let context: BrowserContext | null = null
+  let page: Page | null = null
   
   try {
     if (tempStatePath) {
@@ -118,7 +119,7 @@ export async function scrapeXProfile(
       'sec-ch-ua-platform': '"Windows"',
     })
 
-    const page = await context.newPage()
+    page = await context.newPage()
     
     // Set timeout to 30 seconds
     page.setDefaultTimeout(30000)
@@ -262,17 +263,21 @@ export async function scrapeXProfile(
       console.error(`Error during scraping of @${username}:`, innerErr)
       let screenshotBase64: string | undefined
       try {
-        const screenshotBuf = await page.screenshot({ type: 'png', timeout: 7000 })
-        screenshotBase64 = `data:image/png;base64,${screenshotBuf.toString('base64')}`
-        
-        // Save to public dir for redundancy/direct web access
-        const publicDir = path.join(process.cwd(), 'public')
-        if (!fs.existsSync(publicDir)) {
-          fs.mkdirSync(publicDir, { recursive: true })
+        if (page) {
+          const screenshotBuf = await page.screenshot({ type: 'png', timeout: 7000 })
+          screenshotBase64 = `data:image/png;base64,${screenshotBuf.toString('base64')}`
+          
+          // Save to public dir for redundancy/direct web access
+          const publicDir = path.join(process.cwd(), 'public')
+          if (!fs.existsSync(publicDir)) {
+            fs.mkdirSync(publicDir, { recursive: true })
+          }
+          fs.writeFileSync(path.join(publicDir, 'debug-screenshot.png'), screenshotBuf)
+          fs.writeFileSync(path.join(publicDir, 'debug-page.html'), await page.content(), 'utf8')
+          console.log('Saved debug-screenshot.png and debug-page.html to public folder.')
+        } else {
+          console.warn('Cannot capture screenshot: Playwright page was not initialized.')
         }
-        fs.writeFileSync(path.join(publicDir, 'debug-screenshot.png'), screenshotBuf)
-        fs.writeFileSync(path.join(publicDir, 'debug-page.html'), await page.content(), 'utf8')
-        console.log('Saved debug-screenshot.png and debug-page.html to public folder.')
       } catch (debugErr) {
         console.error('Failed to capture debug assets:', debugErr)
       }
