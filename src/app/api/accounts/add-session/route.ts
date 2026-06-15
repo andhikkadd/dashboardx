@@ -71,17 +71,54 @@ export async function POST(request: Request) {
 
       const storageStateString = JSON.stringify(storageState)
       const encryptedState = encrypt(storageStateString)
+      const storageStatePath = path.join('storage-states', `${username}.json`)
 
       // Test the session validity by calling the scraper immediately
       console.log(`Verifying cookie credentials for @${username}...`)
-      const scraped = await scrapeXProfile(username, encryptedState)
+      let scraped
+      try {
+        scraped = await scrapeXProfile(username, encryptedState)
+      } catch (scrapeErr: any) {
+        // Scrape failed! Create/update the account with ERROR status so we have a record
+        const account = await prisma.account.upsert({
+          where: {
+            userId_username: {
+              userId,
+              username,
+            },
+          },
+          update: {
+            status: AccountStatus.ERROR,
+            storageStateData: encryptedState,
+          },
+          create: {
+            userId,
+            username,
+            displayName: username,
+            status: AccountStatus.ERROR,
+            storageStatePath,
+            storageStateData: encryptedState,
+          },
+        })
+
+        // Log the failure to the DB with the screenshot/details!
+        await prisma.monitorLog.create({
+          data: {
+            accountId: account.id,
+            type: LogType.ERROR,
+            message: `Failed to import account @${username}. Error: ${scrapeErr?.message || 'Unknown error'}`,
+            details: scrapeErr?.screenshot || scrapeErr?.stack || String(scrapeErr),
+          },
+        })
+
+        throw scrapeErr
+      }
       
       // If we got here, it succeeded! Save to file
       const statesDir = path.join(process.cwd(), 'storage-states')
       if (!fs.existsSync(statesDir)) {
         fs.mkdirSync(statesDir, { recursive: true })
       }
-      const storageStatePath = path.join('storage-states', `${username}.json`)
       fs.writeFileSync(path.join(process.cwd(), storageStatePath), encryptedState, 'utf8')
 
       // Create or update Account record in DB

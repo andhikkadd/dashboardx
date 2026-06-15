@@ -3,6 +3,15 @@ import fs from 'fs'
 import path from 'path'
 import { decrypt } from '@/lib/encryption'
 
+export class ScraperError extends Error {
+  screenshot?: string // base64 string
+  constructor(message: string, screenshot?: string) {
+    super(message)
+    this.name = 'ScraperError'
+    this.screenshot = screenshot
+  }
+}
+
 export interface ScrapedData {
   username: string
   displayName: string | null
@@ -85,27 +94,15 @@ export async function scrapeXProfile(
     // Set timeout to 30 seconds
     page.setDefaultTimeout(30000)
 
-    const profileUrl = `https://x.com/${username}`
-    await page.goto(profileUrl, { waitUntil: 'domcontentloaded' })
-    
-    // Wait for the main profile page content to load
-    // Test for data-testid="UserName" which indicates the page loaded
     try {
-      await page.waitForSelector('div[data-testid="UserName"]', { timeout: 15000 })
-    } catch (e) {
-      // Capture debug screenshot and page content
+      const profileUrl = `https://x.com/${username}`
+      await page.goto(profileUrl, { waitUntil: 'domcontentloaded' })
+      
+      // Wait for the main profile page content to load
+      // Test for data-testid="UserName" which indicates the page loaded
       try {
-        const publicDir = path.join(process.cwd(), 'public')
-        if (!fs.existsSync(publicDir)) {
-          fs.mkdirSync(publicDir, { recursive: true })
-        }
-        await page.screenshot({ path: path.join(publicDir, 'debug-screenshot.png'), fullPage: true })
-        fs.writeFileSync(path.join(publicDir, 'debug-page.html'), await page.content(), 'utf8')
-        console.log('Saved debug-screenshot.png and debug-page.html to public folder.')
-      } catch (debugErr) {
-        console.error('Failed to capture debug screenshot/HTML:', debugErr)
-      }
-
+        await page.waitForSelector('div[data-testid="UserName"]', { timeout: 15000 })
+    } catch (e) {
       // If UserName testid is not present, check if we're redirected to login page (auth expired)
       const currentUrl = page.url()
       if (currentUrl.includes('login') || currentUrl.includes('i/flow/login')) {
@@ -231,6 +228,26 @@ export async function scrapeXProfile(
       posts,
       joinDate,
       profileUrl,
+    }
+    } catch (innerErr: any) {
+      console.error(`Error during scraping of @${username}:`, innerErr)
+      let screenshotBase64: string | undefined
+      try {
+        const screenshotBuf = await page.screenshot({ type: 'png', fullPage: true })
+        screenshotBase64 = `data:image/png;base64,${screenshotBuf.toString('base64')}`
+        
+        // Save to public dir for redundancy/direct web access
+        const publicDir = path.join(process.cwd(), 'public')
+        if (!fs.existsSync(publicDir)) {
+          fs.mkdirSync(publicDir, { recursive: true })
+        }
+        fs.writeFileSync(path.join(publicDir, 'debug-screenshot.png'), screenshotBuf)
+        fs.writeFileSync(path.join(publicDir, 'debug-page.html'), await page.content(), 'utf8')
+        console.log('Saved debug-screenshot.png and debug-page.html to public folder.')
+      } catch (debugErr) {
+        console.error('Failed to capture debug assets:', debugErr)
+      }
+      throw new ScraperError(innerErr?.message || String(innerErr), screenshotBase64)
     }
   } finally {
     await browser.close()

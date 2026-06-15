@@ -135,9 +135,22 @@ export default function LogsPage() {
                     <p className="text-zinc-300 text-sm leading-relaxed">{log.message}</p>
                     
                     {log.details && (
-                      <pre className="mt-2 text-[10px] font-mono bg-zinc-950 p-2.5 rounded-lg border border-zinc-900 text-zinc-400 overflow-x-auto max-w-full">
-                        {JSON.stringify(log.details, null, 2)}
-                      </pre>
+                      <div className="mt-2 space-y-2">
+                        {log.details.startsWith('data:image/') ? (
+                          <div className="border border-zinc-800 rounded-lg overflow-hidden bg-zinc-950 p-2 max-w-xl">
+                            <p className="text-zinc-500 text-[10px] font-semibold mb-2">Debug Screenshot:</p>
+                            <img 
+                              src={log.details} 
+                              alt="Debug screenshot" 
+                              className="w-full h-auto rounded border border-zinc-900 bg-zinc-950" 
+                            />
+                          </div>
+                        ) : (
+                          <pre className="text-[10px] font-mono bg-zinc-950 p-2.5 rounded-lg border border-zinc-900 text-zinc-400 overflow-x-auto max-w-full">
+                            {JSON.stringify(log.details, null, 2)}
+                          </pre>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
