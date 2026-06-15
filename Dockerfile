@@ -29,9 +29,6 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Install Playwright Chromium and its OS dependencies
-RUN npx playwright install chromium --with-deps
-
 # Copy standalone build assets
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
@@ -45,7 +42,11 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
+# Install Playwright Chromium and its OS dependencies (uses the project's exact playwright version from node_modules)
+RUN npx playwright install chromium --with-deps
+
 EXPOSE 3000
 
 # Start the Next.js standalone server via wrapper
 CMD ["node", "start.js"]
+
