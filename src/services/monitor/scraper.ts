@@ -61,7 +61,7 @@ export async function scrapeXProfile(
     fs.writeFileSync(tempStatePath, decryptedState, 'utf8')
   }
 
-  // Launch browser
+  // Launch browser with memory-optimized flags for Cloud Run
   const browser = await chromium.launch({
     headless,
     args: [
@@ -70,6 +70,23 @@ export async function scrapeXProfile(
       '--disable-dev-shm-usage',
       '--disable-gpu',
       '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-breakpad',
+      '--disable-component-update',
+      '--disable-default-apps',
+      '--disable-hang-monitor',
+      '--disable-ipc-flooding-protection',
+      '--disable-popup-blocking',
+      '--disable-prompt-on-repost',
+      '--disable-renderer-backgrounding',
+      '--disable-sync',
+      '--disable-translate',
+      '--metrics-recording-only',
+      '--no-first-run',
+      '--single-process',
+      '--js-flags=--max-old-space-size=256',
     ],
   })
 
@@ -188,20 +205,20 @@ export async function scrapeXProfile(
 
     page = await context.newPage()
     
+    // Block images, media, fonts, and large assets to save memory on Cloud Run
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType()
+      if (['image', 'media', 'font', 'stylesheet'].includes(resourceType)) {
+        return route.abort()
+      }
+      return route.continue()
+    })
+    
     // Set timeout to 30 seconds
     page.setDefaultTimeout(30000)
 
     try {
       const profileUrl = `https://x.com/${username}`
-
-      // Warm-up: navigate to X.com homepage first to establish session cookies & CSRF tokens
-      console.log(`[Scraper] Warming up session for @${username}...`)
-      try {
-        await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 20000 })
-        await page.waitForTimeout(3000) // Let cookies/tokens settle
-      } catch (warmupErr) {
-        console.warn(`[Scraper] Warm-up navigation failed (non-fatal):`, warmupErr)
-      }
 
       // Navigate to the target profile with retry logic
       const MAX_RETRIES = 3
@@ -210,15 +227,25 @@ export async function scrapeXProfile(
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         console.log(`[Scraper] Loading profile @${username} (attempt ${attempt}/${MAX_RETRIES})...`)
         
+        // Check if browser is still alive before each attempt
+        if (!browser.isConnected()) {
+          throw new Error(`BROWSER_CRASHED: Chromium process died before attempt ${attempt}. This usually means Cloud Run ran out of memory.`)
+        }
+
         try {
           await page.goto(profileUrl, { 
             waitUntil: 'domcontentloaded',
             timeout: 30000
           })
 
-          // Wait for SPA content to render
-          await page.waitForTimeout(2000)
+          // Wait for SPA content to render (use setTimeout instead of page method for safety)
+          await new Promise(resolve => setTimeout(resolve, 2000))
           
+          // Check if browser survived navigation
+          if (!browser.isConnected()) {
+            throw new Error(`BROWSER_CRASHED: Chromium crashed during page load for @${username}.`)
+          }
+
           // Check for the profile UserName element
           await page.waitForSelector('div[data-testid="UserName"]', { timeout: 20000 })
           
@@ -227,10 +254,20 @@ export async function scrapeXProfile(
           break
         } catch (attemptErr: any) {
           lastError = attemptErr
-          console.warn(`[Scraper] Attempt ${attempt} failed for @${username}:`, attemptErr?.message)
+          const errMsg = attemptErr?.message || ''
+          console.warn(`[Scraper] Attempt ${attempt} failed for @${username}:`, errMsg)
+
+          // If browser crashed, no point retrying
+          if (!browser.isConnected() || errMsg.includes('BROWSER_CRASHED') ||
+              errMsg.includes('Target page, context or browser has been closed') ||
+              errMsg.includes('browser has been closed') ||
+              errMsg.includes('Target closed') ||
+              errMsg.includes('Connection closed')) {
+            throw new Error(`BROWSER_CRASHED: Chromium process crashed while loading @${username}. Cloud Run may not have enough memory. Error: ${errMsg}`)
+          }
 
           // Don't retry if it's clearly a non-transient issue
-          const currentUrl = page.url()
+          const currentUrl = await page.url()
           
           // Check for login redirect (session expired — no retry)
           if (currentUrl.includes('login') || currentUrl.includes('i/flow/login')) {
@@ -250,11 +287,11 @@ export async function scrapeXProfile(
             throw new Error(`ACCOUNT_NOT_FOUND: The account @${username} does not exist on X.`)
           }
 
-          // If we have more retries, wait with exponential backoff
+          // If we have more retries, wait with exponential backoff (use safe setTimeout)
           if (attempt < MAX_RETRIES) {
-            const backoffMs = attempt * 5000 // 5s, 10s
+            const backoffMs = attempt * 3000 // 3s, 6s
             console.log(`[Scraper] Waiting ${backoffMs / 1000}s before retry...`)
-            await page.waitForTimeout(backoffMs)
+            await new Promise(resolve => setTimeout(resolve, backoffMs))
           }
         }
       }
@@ -291,7 +328,7 @@ export async function scrapeXProfile(
       }
 
     // Give a short delay for dynamic content
-    await page.waitForTimeout(2000)
+    await new Promise(resolve => setTimeout(resolve, 2000))
 
     // 1. Scraping Display Name
     let displayName: string | null = null
