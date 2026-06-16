@@ -90,25 +90,92 @@ export async function scrapeXProfile(
       })
     }
 
-    // Add stealth scripts to bypass simple bot detection checks on X.com
+    // Add stealth scripts to bypass bot detection checks on X.com
     await context.addInitScript(() => {
       // Hide webdriver
       Object.defineProperty(navigator, 'webdriver', {
         get: () => undefined,
       })
+      // Delete the property entirely as a fallback
+      delete (navigator as any).__proto__.webdriver
+
       // Spoof chrome object
       // @ts-ignore
       window.chrome = {
-        runtime: {},
+        runtime: {
+          onMessage: { addListener: () => {}, removeListener: () => {} },
+          sendMessage: () => {},
+        },
+        loadTimes: () => ({}),
+        csi: () => ({}),
+        app: { isInstalled: false, InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' }, getDetails: () => null, getIsInstalled: () => false, runningState: () => 'cannot_run' },
       }
-      // Spoof plugins
+
+      // Spoof plugins with realistic PluginArray
       Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5],
+        get: () => {
+          const arr = [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+          ]
+          // @ts-ignore
+          arr.item = (i: number) => arr[i] || null
+          // @ts-ignore
+          arr.namedItem = (name: string) => arr.find(p => p.name === name) || null
+          // @ts-ignore
+          arr.refresh = () => {}
+          return arr
+        },
       })
+      
+      // Spoof mimeTypes
+      Object.defineProperty(navigator, 'mimeTypes', {
+        get: () => {
+          const arr = [
+            { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+          ]
+          // @ts-ignore
+          arr.item = (i: number) => arr[i] || null
+          // @ts-ignore
+          arr.namedItem = (name: string) => arr.find(m => m.type === name) || null
+          return arr
+        },
+      })
+
       // Spoof languages
       Object.defineProperty(navigator, 'languages', {
         get: () => ['en-US', 'en'],
       })
+
+      // Spoof hardware concurrency (realistic value)
+      Object.defineProperty(navigator, 'hardwareConcurrency', {
+        get: () => 8,
+      })
+
+      // Spoof device memory
+      Object.defineProperty(navigator, 'deviceMemory', {
+        get: () => 8,
+      })
+
+      // Spoof permissions
+      const originalQuery = window.navigator.permissions?.query?.bind(window.navigator.permissions)
+      if (originalQuery) {
+        window.navigator.permissions.query = (parameters: any) => {
+          if (parameters.name === 'notifications') {
+            return Promise.resolve({ state: Notification.permission } as PermissionStatus)
+          }
+          return originalQuery(parameters)
+        }
+      }
+
+      // WebGL vendor and renderer spoofing
+      const getParameter = WebGLRenderingContext.prototype.getParameter
+      WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
+        if (parameter === 37445) return 'Intel Inc.'       // UNMASKED_VENDOR_WEBGL
+        if (parameter === 37446) return 'Intel Iris OpenGL Engine' // UNMASKED_RENDERER_WEBGL
+        return getParameter.call(this, parameter)
+      }
     })
 
     // Set extra HTTP headers to match a real browser profile
@@ -126,20 +193,102 @@ export async function scrapeXProfile(
 
     try {
       const profileUrl = `https://x.com/${username}`
-      await page.goto(profileUrl, { waitUntil: 'domcontentloaded' })
-      
-      // Wait for the main profile page content to load
-      // Test for data-testid="UserName" which indicates the page loaded
+
+      // Warm-up: navigate to X.com homepage first to establish session cookies & CSRF tokens
+      console.log(`[Scraper] Warming up session for @${username}...`)
       try {
-        await page.waitForSelector('div[data-testid="UserName"]', { timeout: 15000 })
-    } catch (e) {
-      // If UserName testid is not present, check if we're redirected to login page (auth expired)
-      const currentUrl = page.url()
-      if (currentUrl.includes('login') || currentUrl.includes('i/flow/login')) {
-        throw new Error('SESSION_EXPIRED: Redirected to login page. Session cookies are no longer valid.')
+        await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 20000 })
+        await page.waitForTimeout(3000) // Let cookies/tokens settle
+      } catch (warmupErr) {
+        console.warn(`[Scraper] Warm-up navigation failed (non-fatal):`, warmupErr)
       }
-      throw new Error(`PAGE_LOAD_FAILED: Failed to load profile page of @${username}. URL: ${currentUrl}`)
-    }
+
+      // Navigate to the target profile with retry logic
+      const MAX_RETRIES = 3
+      let lastError: Error | null = null
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        console.log(`[Scraper] Loading profile @${username} (attempt ${attempt}/${MAX_RETRIES})...`)
+        
+        try {
+          await page.goto(profileUrl, { 
+            waitUntil: 'domcontentloaded',
+            timeout: 30000
+          })
+
+          // Wait for SPA content to render
+          await page.waitForTimeout(2000)
+          
+          // Check for the profile UserName element
+          await page.waitForSelector('div[data-testid="UserName"]', { timeout: 20000 })
+          
+          // Success! Break out of the retry loop
+          lastError = null
+          break
+        } catch (attemptErr: any) {
+          lastError = attemptErr
+          console.warn(`[Scraper] Attempt ${attempt} failed for @${username}:`, attemptErr?.message)
+
+          // Don't retry if it's clearly a non-transient issue
+          const currentUrl = page.url()
+          
+          // Check for login redirect (session expired — no retry)
+          if (currentUrl.includes('login') || currentUrl.includes('i/flow/login')) {
+            throw new Error('SESSION_EXPIRED: Redirected to login page. Session cookies are no longer valid.')
+          }
+
+          // Check for account suspension
+          const pageContent = await page.textContent('body').catch(() => '') || ''
+          if (pageContent.toLowerCase().includes('account is suspended') || 
+              pageContent.toLowerCase().includes('account has been suspended')) {
+            throw new Error(`ACCOUNT_SUSPENDED: The account @${username} has been suspended by X.`)
+          }
+
+          // Check for "This account doesn't exist"
+          if (pageContent.toLowerCase().includes("this account doesn't exist") ||
+              pageContent.toLowerCase().includes("account doesn\u2019t exist")) {
+            throw new Error(`ACCOUNT_NOT_FOUND: The account @${username} does not exist on X.`)
+          }
+
+          // If we have more retries, wait with exponential backoff
+          if (attempt < MAX_RETRIES) {
+            const backoffMs = attempt * 5000 // 5s, 10s
+            console.log(`[Scraper] Waiting ${backoffMs / 1000}s before retry...`)
+            await page.waitForTimeout(backoffMs)
+          }
+        }
+      }
+
+      // If all retries failed, collect diagnostic info and throw
+      if (lastError) {
+        const currentUrl = page.url()
+        const pageTitle = await page.title().catch(() => 'N/A')
+        const bodyText = await page.textContent('body').catch(() => '') || ''
+        const bodyExcerpt = bodyText.replace(/\s+/g, ' ').trim().substring(0, 300)
+
+        console.error(`[Scraper] All ${MAX_RETRIES} attempts failed for @${username}.`)
+        console.error(`[Scraper] Final URL: ${currentUrl}`)
+        console.error(`[Scraper] Page title: ${pageTitle}`)
+        console.error(`[Scraper] Body excerpt: ${bodyExcerpt}`)
+
+        // Categorize the failure
+        if (bodyExcerpt.toLowerCase().includes('rate limit') || 
+            bodyExcerpt.toLowerCase().includes('too many requests')) {
+          throw new Error(`RATE_LIMITED: X.com rate limited the request for @${username}. Page: ${pageTitle}`)
+        }
+        if (bodyExcerpt.toLowerCase().includes('something went wrong') ||
+            bodyExcerpt.toLowerCase().includes('try again')) {
+          throw new Error(`X_ERROR_PAGE: X.com returned an error page for @${username}. Title: "${pageTitle}". Content: "${bodyExcerpt}"`)
+        }
+        if (bodyExcerpt.toLowerCase().includes('challenge') || 
+            bodyExcerpt.toLowerCase().includes('verify') ||
+            bodyExcerpt.toLowerCase().includes('captcha') ||
+            bodyExcerpt.toLowerCase().includes('arkose')) {
+          throw new Error(`CHALLENGE_PAGE: X.com served a bot challenge/verification page for @${username}. Title: "${pageTitle}"`)
+        }
+
+        throw new Error(`PAGE_LOAD_FAILED: Failed to load profile page of @${username} after ${MAX_RETRIES} attempts. URL: ${currentUrl}. Title: "${pageTitle}". Content: "${bodyExcerpt}"`)
+      }
 
     // Give a short delay for dynamic content
     await page.waitForTimeout(2000)

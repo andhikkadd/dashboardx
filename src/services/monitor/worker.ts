@@ -110,11 +110,13 @@ export async function syncAccount(accountId: string): Promise<boolean> {
 
     const errorMessage = error?.message || 'Unknown error'
     const isSessionExpired = errorMessage.includes('SESSION_EXPIRED')
+    const isAccountSuspended = errorMessage.includes('ACCOUNT_SUSPENDED')
+    const isAccountNotFound = errorMessage.includes('ACCOUNT_NOT_FOUND')
 
-    // Determine new status
-    const newStatus = isSessionExpired
-      ? AccountStatus.SESSION_EXPIRED
-      : AccountStatus.ERROR
+    // Determine new status based on error type
+    let newStatus: AccountStatus = AccountStatus.ERROR
+    if (isSessionExpired) newStatus = AccountStatus.SESSION_EXPIRED
+    else if (isAccountSuspended || isAccountNotFound) newStatus = AccountStatus.INACTIVE
 
     const logType = isSessionExpired
       ? LogType.SESSION_EXPIRED
